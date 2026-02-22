@@ -2,8 +2,7 @@
   "version": 2,
   "functions": {
     "api/scrap.js": {
-      "maxDuration": 10,
-      "runtime": "nodejs18.x"
+      "maxDuration": 10
     }
   },
   "routes": [
