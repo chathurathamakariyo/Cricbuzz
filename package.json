@@ -1,10 +1,19 @@
 {
-  "name": "cricbuzz-api",
-  "version": "1.0.0",
-  "description": "Cricbuzz Live API with Batsman Details",
+  "name": "cricbuzz-live-api",
+  "version": "2.0.0",
+  "description": "Cricbuzz Live Match API with Full Details",
   "main": "api/scrap.js",
+  "scripts": {
+    "start": "node api/scrap.js",
+    "dev": "vercel dev"
+  },
   "dependencies": {
-    "axios": "^1.6.0",
+    "axios": "^1.6.2",
     "cheerio": "^1.0.0-rc.12"
-  }
+  },
+  "devDependencies": {
+    "vercel": "^32.0.0"
+  },
+  "author": "Chathura Hansaka",
+  "license": "MIT"
 }
