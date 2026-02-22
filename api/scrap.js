@@ -1,117 +1,138 @@
-import axios from "axios";
-import cheerio from "cheerio";
+const axios = require('axios');
+const cheerio = require('cheerio');
 
 const BASE_URL = "https://www.cricbuzz.com";
 
-export default async function handler(req, res) {
-  try {
-    const { live } = req.query;
+async function getLiveMatches() {
+    try {
+        const { data } = await axios.get(BASE_URL, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            timeout: 10000
+        });
 
-    const headers = {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9"
-    };
+        const $ = cheerio.load(data);
+        const matches = [];
+        const seenUrls = new Set();
 
-    // Fetch homepage
-    const response = await axios.get(BASE_URL, {
-      headers,
-      timeout: 10000
-    });
+        // Live match links හොයා ගන්නවා
+        $('a[href*="/live-cricket-scores/"]').each((_, element) => {
+            const href = $(element).attr('href');
+            const title = $(element).attr('title') || $(element).text().trim();
+            
+            if (href && title && title.includes(' vs ')) {
+                const matchUrl = BASE_URL + href;
+                
+                if (!seenUrls.has(matchUrl)) {
+                    seenUrls.add(matchUrl);
+                    matches.push({
+                        name: title.replace(/\s+/g, ' ').trim(),
+                        url: matchUrl
+                    });
+                }
+            }
+        });
 
-    const $ = cheerio.load(response.data);
-
-    let matches = [];
-    let seen = new Set();
-
-    $("a[href*='/live-cricket-scores/']").each((i, el) => {
-      const href = $(el).attr("href");
-      const title = $(el).attr("title");
-
-      if (href && title && title.includes(" vs ")) {
-        const fullUrl = BASE_URL + href;
-
-        if (!seen.has(fullUrl)) {
-          seen.add(fullUrl);
-          matches.push({
-            number: matches.length + 1,
-            match_name: title.trim(),
-            match_url: fullUrl
-          });
-        }
-      }
-    });
-
-    if (!matches.length) {
-      return res.status(200).json({
-        creator: "chathura hansaka",
-        status: false,
-        result: "No live matches found or blocked by Cricbuzz"
-      });
+        return matches;
+    } catch (error) {
+        console.error("Error fetching matches:", error.message);
+        return [];
     }
-
-    // ===============================
-    // If specific match requested
-    // ===============================
-    if (live) {
-      const index = parseInt(live) - 1;
-
-      if (isNaN(index) || !matches[index]) {
-        return res.status(200).json({
-          creator: "chathura hansaka",
-          status: false,
-          result: "Invalid match number"
-        });
-      }
-
-      try {
-        const matchPage = await axios.get(matches[index].match_url, {
-          headers,
-          timeout: 10000
-        });
-
-        const $$ = cheerio.load(matchPage.data);
-
-        const metaDesc = $$("meta[name='description']").attr("content");
-
-        let score = "Score not found";
-
-        if (metaDesc) {
-          const match = metaDesc.match(/Follow (.*? \d+\/\d+ \(\d+\))/);
-          if (match) score = match[1];
-        }
-
-        return res.status(200).json({
-          creator: "chathura hansaka",
-          status: true,
-          result: {
-            match_number: live,
-            match_name: matches[index].match_name,
-            live_score: score,
-            url: matches[index].match_url
-          }
-        });
-      } catch (err) {
-        return res.status(200).json({
-          creator: "chathura hansaka",
-          status: false,
-          result: "Failed to fetch match details"
-        });
-      }
-    }
-
-    // Default → return match list
-    return res.status(200).json({
-      creator: "chathura hansaka",
-      status: true,
-      result: matches
-    });
-
-  } catch (error) {
-    return res.status(200).json({
-      creator: "chathura hansaka",
-      status: false,
-      result: "Server error or Cricbuzz blocked request"
-    });
-  }
 }
+
+async function getMatchScore(matchUrl) {
+    try {
+        const { data } = await axios.get(matchUrl, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            timeout: 10000
+        });
+
+        const $ = cheerio.load(data);
+
+        // Meta description එකෙන් score එක හොයන්න
+        const metaDesc = $('meta[name="description"]').attr('content');
+        if (metaDesc && metaDesc.includes('Follow')) {
+            const scoreMatch = metaDesc.match(/Follow (.*? \d+\/\d+ \(\d+\))/);
+            if (scoreMatch) {
+                return scoreMatch[1];
+            }
+        }
+
+        // Title එකෙන් හොයන්න (backup)
+        const title = $('title').text();
+        const titleMatch = title.match(/(\w+ \d+\/\d+ \(\d+\))/);
+        if (titleMatch) {
+            return titleMatch[1];
+        }
+
+        return "Score not found";
+    } catch (error) {
+        console.error("Error fetching score:", error.message);
+        return "Error fetching score";
+    }
+}
+
+module.exports = async (req, res) => {
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
+    try {
+        // ?live=1 query parameter එක check කරන්න
+        const liveIndex = req.query.live;
+        
+        // Live matches list එක ගන්න
+        const matches = await getLiveMatches();
+
+        if (liveIndex) {
+            // Specific match එකක් request කරලා තියෙනවා
+            const index = parseInt(liveIndex) - 1;
+            
+            if (index >= 0 && index < matches.length) {
+                const selectedMatch = matches[index];
+                const score = await getMatchScore(selectedMatch.url);
+                
+                return res.status(200).json({
+                    status: "success",
+                    match: {
+                        name: selectedMatch.name,
+                        url: selectedMatch.url,
+                        score: score
+                    }
+                });
+            } else {
+                return res.status(404).json({
+                    status: "error",
+                    message: "Match not found"
+                });
+            }
+        } else {
+            // Match list එක return කරන්න (formatted)
+            const matchList = matches.map((match, idx) => ({
+                number: idx + 1,
+                name: match.name,
+                url: match.url
+            }));
+
+            return res.status(200).json({
+                status: "success",
+                total: matchList.length,
+                matches: matchList
+            });
+        }
+    } catch (error) {
+        console.error("API Error:", error);
+        return res.status(500).json({
+            status: "error",
+            message: "Internal server error"
+        });
+    }
+};
