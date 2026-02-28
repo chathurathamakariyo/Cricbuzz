@@ -8,18 +8,18 @@
       "maxDuration": 10
     }
   },
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/scrap",
-      "dest": "/api/scrap.js"
+      "source": "/api/scrap",
+      "destination": "/api/scrap.js"
     },
     {
-      "src": "/api/live",
-      "dest": "/api/live.js"
+      "source": "/api/live",
+      "destination": "/api/live.js"
     },
     {
-      "src": "/(.*)",
-      "dest": "/api/scrap.js"
+      "source": "/(.*)",
+      "destination": "/api/scrap.js"
     }
   ],
   "headers": [
