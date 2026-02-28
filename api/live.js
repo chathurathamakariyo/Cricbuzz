@@ -1,26 +1,24 @@
 import axios from "axios";
 
-// ---------------- Utility ----------------
+function extractRunsOvers(score = "") {
+  const runsMatch = score.match(/(\d+)\/(\d+)/);
+  const oversMatch = score.match(/\(([\d.]+)/);
 
-function extractRunsOvers(score) {
-  const runsMatch = score?.match(/(\d+)\/(\d+)/);
-  const oversMatch = score?.match(/\(([\d.]+)/);
-
-  const runs = runsMatch ? parseInt(runsMatch[1]) : 0;
-  const wickets = runsMatch ? parseInt(runsMatch[2]) : 0;
-  const overs = oversMatch ? parseFloat(oversMatch[1]) : 0;
-
-  return { runs, wickets, overs };
+  return {
+    runs: runsMatch ? parseInt(runsMatch[1]) : 0,
+    wickets: runsMatch ? parseInt(runsMatch[2]) : 0,
+    overs: oversMatch ? parseFloat(oversMatch[1]) : 0
+  };
 }
 
 function oversToBalls(overs) {
-  const fullOvers = Math.floor(overs);
-  const balls = Math.round((overs - fullOvers) * 10);
-  return (fullOvers * 6) + balls;
+  const full = Math.floor(overs);
+  const balls = Math.round((overs - full) * 10);
+  return full * 6 + balls;
 }
 
 function calculateCRR(runs, overs) {
-  if (!overs || overs === 0) return 0;
+  if (!overs) return 0;
   return Number((runs / overs).toFixed(2));
 }
 
@@ -41,13 +39,7 @@ function calculateRRR(target, runs, overs, totalOvers = 20) {
   };
 }
 
-// ---------------- API ----------------
-
 export default async function handler(req, res) {
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
 
   try {
 
@@ -57,58 +49,64 @@ export default async function handler(req, res) {
 
     const data = response.data;
 
-    let liveMatches = [];
+    const liveMatches = [];
 
-    for (const sport of data.sports || []) {
-      if (sport.id === "200") { // Cricket
-        for (const league of sport.leagues || []) {
-          for (const event of league.events || []) {
+    if (!data?.sports) {
+      return res.status(200).json({
+        status: false,
+        message: "No sports data found"
+      });
+    }
 
-            if (event.status === "in") {
+    for (const sport of data.sports) {
 
-              const competitors = event.competitors || [];
+      if (sport?.id !== "200") continue; // Cricket only
 
-              const teams = competitors.map(team => {
-                const score = team.score || "";
-                const { runs, overs } = extractRunsOvers(score);
+      for (const league of sport.leagues || []) {
+        for (const event of league.events || []) {
 
-                return {
-                  id: team.id,
-                  name: team.displayName,
-                  shortName: team.shortDisplayName,
-                  score,
-                  currentRunRate: calculateCRR(runs, overs)
-                };
-              });
+          if (!event?.status) continue;
 
-              let chaseInfo = null;
+          // ESPN live status usually: "in"
+          if (event.status !== "in") continue;
 
-              if (teams.length === 2) {
+          const competitors = event.competitors || [];
+          if (competitors.length < 2) continue;
 
-                const firstInnings = extractRunsOvers(teams[1].score);
-                const secondInnings = extractRunsOvers(teams[0].score);
+          const teams = competitors.map(team => {
 
-                if (firstInnings.runs && secondInnings.overs) {
-                  chaseInfo = calculateRRR(
-                    firstInnings.runs + 1,
-                    secondInnings.runs,
-                    secondInnings.overs
-                  );
-                }
-              }
+            const score = team.score || "";
+            const { runs, overs } = extractRunsOvers(score);
 
-              liveMatches.push({
-                matchId: event.id,
-                matchName: event.name,
-                shortName: event.shortName,
-                venue: event.location || "N/A",
-                status: event.fullStatus?.longSummary || "",
-                teams,
-                chaseInfo
-              });
+            return {
+              id: team.id,
+              name: team.displayName,
+              score,
+              currentRunRate: calculateCRR(runs, overs)
+            };
+          });
 
-            }
+          let chaseInfo = null;
+
+          const first = extractRunsOvers(teams[1].score);
+          const second = extractRunsOvers(teams[0].score);
+
+          if (first.runs && second.overs) {
+            chaseInfo = calculateRRR(
+              first.runs + 1,
+              second.runs,
+              second.overs
+            );
           }
+
+          liveMatches.push({
+            matchId: event.id,
+            matchName: event.name || "Unknown",
+            venue: event.location || "N/A",
+            status: event.fullStatus?.longSummary || "",
+            teams,
+            chaseInfo
+          });
         }
       }
     }
@@ -120,9 +118,12 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
+
+    console.error("LIVE API ERROR:", error.message);
+
     return res.status(500).json({
       status: false,
-      message: error.message
+      error: error.message
     });
   }
 }
