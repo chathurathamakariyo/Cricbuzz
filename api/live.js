@@ -1,8 +1,7 @@
-import fetch from "node-fetch";
+import axios from "axios";
 
-// -------- Utility Functions --------
+// ---------------- Utility ----------------
 
-// Extract runs & overs
 function extractRunsOvers(score) {
   const runsMatch = score?.match(/(\d+)\/(\d+)/);
   const oversMatch = score?.match(/\(([\d.]+)/);
@@ -14,20 +13,17 @@ function extractRunsOvers(score) {
   return { runs, wickets, overs };
 }
 
-// Convert overs (15.3 → balls)
 function oversToBalls(overs) {
   const fullOvers = Math.floor(overs);
   const balls = Math.round((overs - fullOvers) * 10);
-  return fullOvers * 6 + balls;
+  return (fullOvers * 6) + balls;
 }
 
-// Current Run Rate
 function calculateCRR(runs, overs) {
   if (!overs || overs === 0) return 0;
   return Number((runs / overs).toFixed(2));
 }
 
-// Required Run Rate
 function calculateRRR(target, runs, overs, totalOvers = 20) {
   const totalBalls = totalOvers * 6;
   const usedBalls = oversToBalls(overs);
@@ -38,22 +34,30 @@ function calculateRRR(target, runs, overs, totalOvers = 20) {
   const runsNeeded = target - runs;
 
   return {
+    target,
     runsNeeded,
     ballsRemaining: remainingBalls,
-    requiredRR: Number((runsNeeded / (remainingBalls / 6)).toFixed(2))
+    requiredRunRate: Number((runsNeeded / (remainingBalls / 6)).toFixed(2))
   };
 }
 
-// -------- API Handler --------
+// ---------------- API ----------------
 
 export default async function handler(req, res) {
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   try {
-    const url = "https://site.api.espn.com/apis/personalized/v2/scoreboard/header";
 
-    const response = await fetch(url);
-    const data = await response.json();
+    const response = await axios.get(
+      "https://site.api.espn.com/apis/personalized/v2/scoreboard/header"
+    );
 
-    const liveMatches = [];
+    const data = response.data;
+
+    let liveMatches = [];
 
     for (const sport of data.sports || []) {
       if (sport.id === "200") { // Cricket
@@ -71,15 +75,16 @@ export default async function handler(req, res) {
                 return {
                   id: team.id,
                   name: team.displayName,
+                  shortName: team.shortDisplayName,
                   score,
-                  runRate: calculateCRR(runs, overs)
+                  currentRunRate: calculateCRR(runs, overs)
                 };
               });
 
-              // Target calculation (first innings score)
               let chaseInfo = null;
 
               if (teams.length === 2) {
+
                 const firstInnings = extractRunsOvers(teams[1].score);
                 const secondInnings = extractRunsOvers(teams[0].score);
 
@@ -93,14 +98,15 @@ export default async function handler(req, res) {
               }
 
               liveMatches.push({
-                id: event.id,
-                name: event.name,
-                summary: event.summary,
+                matchId: event.id,
+                matchName: event.name,
+                shortName: event.shortName,
                 venue: event.location || "N/A",
+                status: event.fullStatus?.longSummary || "",
                 teams,
-                chaseInfo,
-                status: event.fullStatus?.longSummary || ""
+                chaseInfo
               });
+
             }
           }
         }
@@ -108,17 +114,15 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      creator: "Chathura Hansaka",
       status: true,
-      total: liveMatches.length,
+      totalLiveMatches: liveMatches.length,
       matches: liveMatches
     });
 
   } catch (error) {
     return res.status(500).json({
-      creator: "Chathura Hansaka",
       status: false,
-      error: error.message
+      message: error.message
     });
   }
 }
